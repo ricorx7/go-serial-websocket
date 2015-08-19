@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<script src="//ajax.googleapis.com/ajax/libs/angularjs/1.4.3/angular.min.js"></script>
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap-theme.min.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+
+<head>
+	<style>
+	ul
+	{
+	list-style-type: none;
+	padding: 0;
+	margin: 0;
+	}
+	</style>
+</head>
+
+<body>
+
+<div ng-app="echo" ng-controller="SerialCtrl">
+
+<div class="row" style="margin: 10px">
+<div class="col-sm-8">
+	<div class="panel panel-default">
+		<div class="panel-heading">ADCP
+			<div class="btn-group pull-right" style="margin-right:6px;">
+					<button class="btn btn-xs btn-default spconsole-clear" align="right" ng-click="clear()">CLEAR</button>
+					<button type="button" class="btn btn-xs btn-default spconsole-pause "><span class="glyphicon glyphicon-ban-circle"></span></button>
+        </div>
+
+		</div>
+
+			<div class="row">
+				<div class="col-sm-10">
+					<textarea data-ng-bind="messageStr" readonly rows="35" cols="100" ></textarea>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="col-sm-10">
+					<input type="text" cols="75" placeholder="type here" ng-model="msg" ng-enter="send()">
+					<button class="btn" ng-click="send()">Send</button>
+					<button class="btn" ng-click="stop()">STOP</button>
+					<button class="btn" ng-click="start()">START</button>
+					<button class="btn" ng-click="break()">BREAK</button>
+				</div>
+			</div>
+
+			</div>
+		</div>
+
+		<div class="col-sm-4">
+
+			<div class="panel panel-default">
+				<div class="panel-heading">Ports and Settings</div>
+
+				<!--Tab Panel-->
+				<ul class="nav nav-tabs">
+					<li class="active">
+						<a href="#ports" data-toggle="tab">Serial Ports
+							<button type="button" class="btn btn-xs btn-default spconsole-pause " ng-click="list()">
+								<span class="glyphicon glyphicon-refresh"></span>
+							</button>
+						</a>
+					</li>
+					<li class="">
+						<a href="#status" data-toggle="tab">Status</a>
+					</li>
+				</ul>
+				<!--Tab Content-->
+				<div class="tab-content">
+
+					<div id="ports" class="tab-pane fade in active">
+						<div class="row">
+							<div class="col-sm-10">
+								<ul ng-repeat="port in portList.SerialPorts">
+									<li>
+										<div class="panel panel-default">
+											<div class="panel-heading"><span data-ng-bind="port.Friendly"></div>
+											Baud: <span data-ng-bind="port.Baud"></span><br>
+											Is Open: <span data-ng-bind="port.IsOpen"></span><br>
+											<button class="btn btn-xs btn-default" ng-click="connect(port)">Connect</button>
+											<button class="btn btn-xs btn-default" ng-click="disconnect(port)">Disconnect</button>
+											<input type="text" cols="75" placeholder="type here" ng-model="portMsg" ng-enter="send()">
+											<button class="btn" ng-click="sendPortMsg()">Send</button>
+										</div>
+									</li>
+								</ul>
+							</div>
+						</div>
+					</div>
+
+					<div id="status" class="tab-pane fade">
+						<div class="row">
+							<div class="col-sm-10">
+								<ul ng-repeat="m in statusMsgs track by $index">
+											<li><span data-ng-bind="m"></span></li>
+								</ul>
+							</div>
+						</div>
+
+						<div class="row">
+							<div class="col-sm-5">
+								<strong>Server:</strong>
+							</div>
+							<div class="col-md-10">
+								<input type="text" ng-model="serverAddr" placeholder="ADDRESS">
+								<button class="btn btn-default" ng-click="reconnectWebsocket()">Connect</button>
+							</div>
+						</div>
+
+						<div class="row">
+							<div class="col-sm-5">
+								<strong>Websocket Server:</strong>
+							</div>
+							<div class="col-sm-10">
+								<span data-ng-bind="webSocketAddr"></span>
+							</div>
+						</div>
+
+						<div class="row">
+							<div class="col-sm-5">
+								<strong>Websocket Status:</strong>
+							</div>
+							<div class="col-sm-10">
+								<span data-ng-bind="websocketState"></span>
+							</div>
+						</div>
+
+					</div><!--Status-->
+
+			</div>
+
+		</div>
+	</div>
+
+	</div>
+
+</div>
+
+<div><span data-ng-bind="log"></span></div>
+
+<script>
+
+jQuery(document).ready(function ($) {
+        $('#tabs').tab();
+    });
+
+var app = angular.module('echo', []);
+app.controller('SerialCtrl', function($scope) {
+
+	// Flag used to find the Serial Port list
+	var isUpdatePortList = false;
+
+  $scope.statusMsgs = [];
+  $scope.messageStr = "";
+	$scope.portList = "";
+	$scope.serverAddr = "localhost:8989/ws";
+	$scope.webSocketAddr = "ws://localhost:8989/ws";
+	$scope.websocketState = "";
+	$scope.portMsg = "";
+
+	$scope.ConnectedPort = null;
+
+	// Websocket connection
+	$scope.conn = null;
+
+	// Append the data so it will not be a large buffer
+  function appendLog(msg) {
+		// Update the port list
+		if(isUpdatePortList == true)
+		{
+			updatePortsList(msg);
+		}
+
+		var jsonData = JSON.parse(msg);
+
+		// Get the version
+		if( jsonData.hasOwnProperty('Version'))
+		{
+			$scope.version = jsonData.Version;
+		}
+
+		// Get the commands
+		if( jsonData.hasOwnProperty('Commands'))
+		{
+			$scope.commands = jsonData.Commands;
+		}
+
+		// If JSON data contains a D element,
+		// display just the data.  If the not display all
+		if(jsonData.D == undefined)
+		{
+			$scope.messageStr += msg;
+		}
+		else if( jsonData.hasOwnProperty('D'))
+		{
+			$scope.messageStr += jsonData.D;
+		}
+		else {
+			//$scope.messages.push(msg);
+			//$scope.messageStr += msg;
+			//$scope.messageStr += jsonData.D;
+		}
+
+		// Keep the buffer at a max length and remove the earlier data
+    var maxLength = 3000;
+    if($scope.messageStr.length > maxLength)
+    {
+      $scope.messageStr = $scope.messageStr.substring($scope.messageStr.length-maxLength, maxLength);
+    }
+  }
+
+	///
+	/// Append Status log.
+	///
+	function appendStatusLog(msg) {
+		var max = 10;
+		// Add element to front
+		$scope.statusMsgs.unshift(msg);
+
+		// If the array is to big, remove last element
+		if($scope.statusMsgs.length > max)
+		{
+			$scope.statusMsgs.splice($scope.statusMsgs.length-1, 1);
+		}
+	}
+
+	///
+	/// Update the port list
+	///
+	function updatePortsList(msg) {
+		$scope.portList += msg;
+
+		// Wait until the entire JSON message is received
+		// If greater than -1, then the end of the JSON string was found
+		if(msg.indexOf("]") > -1)
+		{
+			// Turn off looking for the list
+			isUpdatePortList = false;
+
+			// Remove the "list" command from the string result
+			$scope.portList = $scope.portList.replace("list", "");
+
+			// Convert to a JSON object
+			$scope.portList = JSON.parse($scope.portList);
+		}
+	}
+
+	///
+	/// Set the Websocket status
+	///
+	function setWebsocketStatus(msg) {
+		var state = conn.readyState;
+		if(state == 0)
+		{
+			$scope.websocketState = "CONNECTING";
+			appendStatusLog(msg + "WS CONNECTING");
+		}
+		else if(state == 1)
+		{
+			$scope.websocketState = "OPEN";
+			appendStatusLog(msg + "WS OPEN");
+		}
+		else if(state == 2)
+		{
+			$scope.websocketState = "CLOSING";
+			appendStatusLog(msg + "WS CLOSING");
+		}
+		else if(state == 3)
+		{
+			$scope.websocketState = "CLOSED";
+			appendStatusLog(msg + "WS CLOSED");
+		}
+
+	}
+
+
+	var WebsocketConnect = function(){
+	// Websocket connection
+	conn = new WebSocket($scope.webSocketAddr);
+
+  // called when the server closes the connection
+  conn.onclose = function(e) {
+    $scope.$apply(function(){
+      appendStatusLog("DISCONNECTED");
+			setWebsocketStatus("onclose:");
+    });
+  };
+  // called when the connection to the server is made
+  conn.onopen = function(e) {
+    $scope.$apply(function(){
+      appendStatusLog("CONNECTED");
+			setWebsocketStatus("onopen:");
+    })
+  };
+  // called when a message is received from the server
+  conn.onmessage = function(e){
+    $scope.$apply(function(){
+      //$scope.messages.push(e.data);
+      appendLog(e.data);
+			setWebsocketStatus("onmessage:");
+    });
+  };
+	// called when a message is received from the server
+	conn.onerror = function(e){
+		$scope.$apply(function(){
+			//$scope.messages.push(e.data);
+			appendLog(e.data);
+			setWebsocketStatus("onerror:");
+		});
+	};
+};
+// Set Initial Websocket connection
+WebsocketConnect();
+
+  $scope.send = function() {
+    conn.send($scope.msg);
+    $scope.msg = "";
+		setWebsocketStatus("send:");
+  }
+  $scope.break = function() {
+		if($scope.ConnectedPort != null )
+		{
+			var cmd = "SEND " + $scope.ConnectedPort.Name + " BREAK\r\n";
+			conn.send(cmd);
+		}
+    $scope.msg = "";
+  }
+  $scope.stop = function() {
+		if($scope.ConnectedPort != null )
+		{
+			var cmd = "SEND " + $scope.ConnectedPort.Name + " BREAK\r\n";
+			conn.send(cmd);
+
+			// Wait a period of time to send the next command
+			cmd = "SEND " + $scope.ConnectedPort.Name + " STOP\r\n";
+			setTimeout(function() { conn.send(cmd); }, 500);
+		}
+    $scope.msg = "";
+  }
+  $scope.start = function() {
+		if($scope.ConnectedPort != null )
+		{
+			var cmd = "SEND " + $scope.ConnectedPort.Name + " START\r\n";
+			conn.send(cmd);
+		}
+
+    $scope.msg = "";
+  }
+	$scope.clear = function() {
+		$scope.messageStr = "";
+		$scope.jsonData = "";
+	}
+	$scope.list = function() {
+		// Update the port list
+		isUpdatePortList = true;
+		$scope.portList = "";
+		conn.send("list");
+		setWebsocketStatus("list:");
+	}
+	// Connect to the serial port selected
+	$scope.connect = function(port) {
+		$scope.ConnectedPort = port;
+
+		if(port.IsOpen == false)
+		{
+			var cmd = "OPEN " + $scope.ConnectedPort.Name + " 115200\r\n";
+			conn.send(cmd);
+		}
+	}
+	// Connect to the serial port selected
+	$scope.disconnect = function(port) {
+		// Send the command
+		var cmd = "Close " + port.Name + "\r\n";
+		conn.send(cmd);
+
+		// Clear the connected port
+		$scope.ConnectedPort = null;
+	}
+	// Connect to the server
+	$scope.reconnectWebsocket = function() {
+		// Set address
+		$scope.webSocketAddr  = "ws://" + $scope.serverAddr;
+		// Close the connection
+		conn.close();
+		// Reset messages
+		appendStatusLog("RECONNECT");
+		setWebsocketStatus("reconnectWebsocket:");
+		// Reset the websocket connection
+		WebsocketConnect();
+	}
+	$scope.sendPortMsg = function(port) {
+		var cmd = "SEND " + port.Name + " " + $scope.portMsg +  "\r\n";
+		$scope.cmd = cmd;
+		conn.send(cmd);
+		$scope.portMsg = "";
+	}
+
+
+});
+</script>
+
+</body>
+</html>
