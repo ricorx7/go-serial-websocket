@@ -27,7 +27,7 @@ var echo = echoHub{
 	serialBroadcast: make(chan []byte, 1000),       // Broadcast data to the serial port
 	register:        make(chan *websocketConn),     // Register a websocket connections
 	unregister:      make(chan *websocketConn),     // Unregister a websocket connection
-	websocketConn:   make(map[*websocketConn]bool), // Websocket connection
+	websocketConn:   make(map[*websocketConn]bool), // Websocket connection map
 }
 
 // init starts the ECHO process.
@@ -41,7 +41,10 @@ func (echo *echoHub) init(port *string, baudInt int) {
 	// Start Echo
 	go echo.run()
 
-	openSerialPort(*port, baudInt)
+	// If a port was given, open the port
+	if len(*port) > 0 {
+		go openSerialPort(*port, baudInt)
+	}
 
 }
 
@@ -50,11 +53,13 @@ func (echo *echoHub) init(port *string, baudInt int) {
 // and serial ports for connections
 // and disconnects.
 func (echo *echoHub) run() {
+	log.Print("Echo Hub running")
 	for {
 		select {
 
 		// Register websocket
 		case c := <-echo.register:
+			// Register the websocket to the map
 			echo.websocketConn[c] = true
 			// send supported commands
 			c.send <- []byte("{\"Version\" : \"" + version + "\"} ")
@@ -64,21 +69,15 @@ func (echo *echoHub) run() {
 
 		// Unregister websocket
 		case c := <-echo.unregister:
-			delete(echo.websocketConn, c)
-			// put close in func cuz it was creating panics and want
-			// to isolate
-			func() {
-				// this method can panic if websocket gets disconnected
-				// from users browser and we see we need to unregister a couple
-				// of times, i.e. perhaps from incoming data from serial triggering
-				// an unregister. (NOT 100% sure why seeing c.send be closed twice here)
-				defer func() {
-					if e := recover(); e != nil {
-						log.Println("Got panic: ", e)
-					}
-				}()
+			if _, ok := echo.websocketConn[c]; ok {
+
+				log.Println("UnRegistering websocket")
+
+				// Close the websocket send channel
 				close(c.send)
-			}()
+				// Unregister the websocket from the map
+				delete(echo.websocketConn, c)
+			}
 
 		// Data received from websocket
 		case m := <-echo.serialBroadcast:
@@ -89,22 +88,22 @@ func (echo *echoHub) run() {
 			}
 
 		// Data received from the serial port
-		case s := <-echo.wsBroadcast:
-			//log.Print("Got a websocket broadcast")
+		case m := <-echo.wsBroadcast:
+			//log.Print("Got a websocket broadcast" + string(m))
 
 			for c := range echo.websocketConn {
 				select {
-				case c.send <- s: // Send the data from broadcast to all websocket connections
-					//log.Printf("Got a broadcast: %v\n", string(s))
-
+				case c.send <- m: // Send the data from broadcast to all websocket connections
 				default:
-					delete(echo.websocketConn, c)
+					log.Print("Close websocket send")
 					close(c.send)
-					go c.ws.Close()
+					delete(echo.websocketConn, c)
+					//go c.ws.Close()
 				}
 			}
 
 		}
+		//log.Print("Echo Hub loop")
 	}
 }
 
@@ -118,7 +117,6 @@ func checkCmd(cmd []byte) {
 	sl := strings.ToLower(s)
 
 	if strings.HasPrefix(sl, "open") {
-		// Open the port
 		openPort(s)
 	} else if strings.HasPrefix(sl, "close") {
 		closePort(s)
@@ -130,6 +128,7 @@ func checkCmd(cmd []byte) {
 	} else {
 
 	}
+	log.Print("leaving checkCmd")
 }
 
 // openPort will open the serial port.
@@ -148,35 +147,38 @@ func openPort(cmd string) {
 	}
 
 	// Get the port name
-	portname := cmds[1]
+	portname := strings.TrimSpace(cmds[1])
 
-	//see if we have this port open
-	spio, isFound := findPortByName(portname)
+	// See if we have this port open
+	_, isFound := findPortByName(portname)
 
 	if isFound {
 		//We found the serial port so it is already open
 		log.Println("Serial port " + portname + " is already open.")
 
 		// Close the serial port and reconnect
-		serialHub.unregister <- spio
+		closeSerialPort(portname)
 	}
 
 	// Convert the baud rate to int
-	baudInt, err := strconv.Atoi(cmds[2])
+	baudInt, err := strconv.Atoi(strings.TrimSpace(cmds[2]))
 	if err != nil {
-		log.Println("Baud rate give is bad")
+		log.Println("Baud rate give is bad", err)
 		return
 	}
 
+	log.Printf("Opening Port %s at baud %d", portname, baudInt)
+
 	// Open the serial port
 	// This will also register the serial port
-	openSerialPort(portname, baudInt)
+	go openSerialPort(portname, baudInt)
 }
 
 // closePort will close the serial port.
 // Cmd: CLOSE COM6
 // Give the serial port and baud rate.
 func closePort(cmd string) {
+	log.Println(cmd)
 	// Trim the command
 	cmd = strings.TrimPrefix(cmd, " ")
 
@@ -189,8 +191,10 @@ func closePort(cmd string) {
 	}
 
 	// Get the port name
-	portname := cmds[1]
+	portname := strings.TrimSpace(cmds[1])
+
+	log.Println(portname)
 
 	// Close the given serial port
-	closeSerialPort(strings.Trim(portname, ""))
+	closeSerialPort(portname)
 }

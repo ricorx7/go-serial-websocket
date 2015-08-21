@@ -79,12 +79,12 @@
 									<li>
 										<div class="panel panel-default">
 											<div class="panel-heading"><span data-ng-bind="port.Friendly"></div>
-											Baud: <span data-ng-bind="port.Baud"></span><br>
+											Baud: <input type="text" cols="75" placeholder="baud rate" ng-model="port.Baud"><br>
 											Is Open: <span data-ng-bind="port.IsOpen"></span><br>
 											<button class="btn btn-xs btn-default" ng-click="connect(port)">Connect</button>
-											<button class="btn btn-xs btn-default" ng-click="disconnect(port)">Disconnect</button>
-											<input type="text" cols="75" placeholder="type here" ng-model="portMsg" ng-enter="send()">
-											<button class="btn" ng-click="sendPortMsg()">Send</button>
+											<button class="btn btn-xs btn-default" ng-click="disconnect(port)">Disconnect</button><br>
+											<input type="text" cols="75" placeholder="type here" ng-model="portMsg" ng-enter="sendPortMsg()">
+											<button class="btn" ng-click="sendPortMsg(port, portMsg)">Send</button>
 										</div>
 									</li>
 								</ul>
@@ -163,6 +163,23 @@ app.controller('SerialCtrl', function($scope) {
 	$scope.portMsg = "";
 
 	$scope.ConnectedPort = null;
+
+	//$scope.baudRates = [921600, 460800, 230400, 115200, 38400, 19200, 9600, 4800, 2400];
+	// $scope.baudRates = {
+  //   singleSelect: null,
+  //   availableBaudRates: [
+  //     {id: '1', name: '921600'},
+  //     {id: '2', name: '460800'},
+  //     {id: '3', name: '230400'},
+	// 		{id: '3', name: '115200'},
+	// 		{id: '3', name: '38400'},
+	// 		{id: '3', name: '19200'},
+	// 		{id: '3', name: '9600'},
+	// 		{id: '3', name: '4800'},
+	// 		{id: '3', name: '2400'},
+  //   ],
+  //  };
+
 
 	// Websocket connection
 	$scope.conn = null;
@@ -367,14 +384,14 @@ WebsocketConnect();
 
 		if(port.IsOpen == false)
 		{
-			var cmd = "OPEN " + $scope.ConnectedPort.Name + " 115200\r\n";
+			var cmd = "OPEN " + $scope.ConnectedPort.Name + " " + port.Baud + "\r\n";
 			conn.send(cmd);
 		}
 	}
 	// Connect to the serial port selected
 	$scope.disconnect = function(port) {
 		// Send the command
-		var cmd = "Close " + port.Name + "\r\n";
+		var cmd = "CLOSE " + port.Name + "\r\n";
 		conn.send(cmd);
 
 		// Clear the connected port
@@ -392,11 +409,10 @@ WebsocketConnect();
 		// Reset the websocket connection
 		WebsocketConnect();
 	}
-	$scope.sendPortMsg = function(port) {
-		var cmd = "SEND " + port.Name + " " + $scope.portMsg +  "\r\n";
+	$scope.sendPortMsg = function(port, portMsg) {
+		var cmd = "SEND " + port.Name + " " + portMsg +  "\r\n";
 		$scope.cmd = cmd;
 		conn.send(cmd);
-		$scope.portMsg = "";
 	}
 
 

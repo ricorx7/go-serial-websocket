@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rowetechinc/go-serial"
+	"github.com/ricorx7/go-serial"
 )
 
 // serialPortIO is the  Serial Port struct.
@@ -102,12 +101,18 @@ func (sh *serialPortHub) run() {
 		case p := <-sh.register:
 			log.Print("Registering a port: ", p.portConf.Name)
 			echo.wsBroadcast <- []byte("{\"Cmd\":\"Open\",\"Desc\":\"Got register/open on port.\",\"Port\":\"" + p.portConf.Name + ",\"Baud\":" + strconv.Itoa(p.portConf.Baud) + "}")
+
+			// Register the serial port with the map
 			sh.ports[p] = true
+			log.Println("Serial Port registered")
 
 			// Unregister a port
 		case p := <-sh.unregister:
 			log.Print("Unregistering a port: ", p.portConf.Name)
 			echo.wsBroadcast <- []byte("{\"Cmd\":\"Close\",\"Desc\":\"Got unregister/close on port.\",\"Port\":\"" + p.portConf.Name + "\",\"Baud\":" + strconv.Itoa(p.portConf.Baud) + "}")
+
+			// Set flag that the serial port is closing
+			// so any loops can stops
 			p.isClosing = true
 
 			// Close the serial port
@@ -130,18 +135,9 @@ func (sh *serialPortHub) run() {
 // It returns the serial port struct that contains the IO.ReadWriterCloser
 // interface of the serial port, and the serial port hardware and
 // port configuration.
-func openSerialPort(portname string, baud int) (*serialPortIO, error) {
+func openSerialPort(portname string, baud int) {
 
-	log.Print("Inside openPort")
-
-	var out bytes.Buffer
-
-	out.WriteString("Opening serial port ")
-	out.WriteString(portname)
-	out.WriteString(" at ")
-	out.WriteString(strconv.Itoa(baud))
-	out.WriteString(" baud")
-	log.Print(out.String())
+	log.Printf("Inside openPort.  Opening serial port %s at %s baud", portname, strconv.Itoa(baud))
 
 	// Set the serial port mode
 	mode := &serial.Mode{
@@ -152,18 +148,10 @@ func openSerialPort(portname string, baud int) (*serialPortIO, error) {
 
 	// Open serial port
 	sp, err := serial.OpenPort(portname, mode)
-	log.Print("Just tried to open port")
 	if err != nil {
 		//log.Fatal(err)
 		log.Print("Error opening port " + err.Error())
-		return nil, err
 	}
-
-	log.Print("Opened port successfully")
-
-	// Send a BREAK
-	sp.SendBreak(250)
-	log.Print("BREAK sent")
 
 	// Create the serial port configuration
 	config := &SerialConfig{Name: portname, Baud: baud, RtsOn: false, DtrOn: false}
@@ -173,18 +161,22 @@ func openSerialPort(portname string, baud int) (*serialPortIO, error) {
 		portConf:   config, // Port configuration
 		portIO:     sp,     // Serial port IO.ReadWriteCloser interface
 		serialPort: sp,     // Serial port hardware commands
+		isClosing:  false,  // Set flag that the port is not closed
 	}
 
 	// Register the serial port
 	serialHub.register <- spio
 
 	// Unregister the serial port when shutdown
-	defer func() { serialHub.unregister <- spio }()
+	defer func() {
+		log.Println("Shutting down the serialPortIO")
+		serialHub.unregister <- spio
+	}()
+
+	log.Println("Serial Port Reader started")
 
 	// Start reading from the serial port
 	spio.reader()
-
-	return spio, nil
 }
 
 // closeSerialPort will close the serial port.
@@ -192,16 +184,16 @@ func openSerialPort(portname string, baud int) (*serialPortIO, error) {
 // serial port is open, it will close the port.
 func closeSerialPort(portName string) {
 	//see if we have this port open
-	myport, isFound := findPortByName(portName)
+	spio, isFound := findPortByName(portName)
 
 	if !isFound {
 		//we couldn't find the port, so send err
 		//spErr("We could not find the serial port " + portname + " that you were trying to write to.")
-		log.Println("We could not find the serial port " + portName + " that you were trying to write to.")
+		log.Println("Could not find the serial port " + portName + " that you were trying to write to.")
 		return
 	}
 
-	serialHub.unregister <- myport
+	serialHub.unregister <- spio
 }
 
 // reader is the Serial port Reader function
@@ -225,15 +217,16 @@ func (spio *serialPortIO) reader() {
 			break
 		}
 
-		// Check for error reading
-		if err != nil {
-			log.Println("Error reading the port.\n", err)
-			break
-		}
-
 		// read can return legitimate bytes as well as an error
 		// so process the bytes if n > 0
 		if n > 0 {
+
+			// Check for error reading
+			if err != nil {
+				log.Println("Error reading the port.\n", err)
+				break
+			}
+
 			//log.Print("Read " + strconv.Itoa(n) + " bytes ch: " + string(ch))
 			// Set the incoming data to a string and trim blank
 			data := string(ch[:n])
@@ -301,7 +294,7 @@ func spWrite(arg string) {
 	log.Println("The data is:" + args[2] + "---")
 
 	//see if we have this port open
-	myport, isFound := findPortByName(portname)
+	spio, isFound := findPortByName(portname)
 
 	if !isFound {
 		//we couldn't find the port, so send err
@@ -315,7 +308,7 @@ func spWrite(arg string) {
 	var wr writeRequest
 
 	// Set the serial port
-	wr.p = myport
+	wr.p = spio
 
 	// include newline and trim the end
 	wr.d = strings.Trim(args[2], "") + "\r"
@@ -333,7 +326,6 @@ func findPortByName(portname string) (*serialPortIO, bool) {
 	for port := range serialHub.ports {
 		if strings.ToLower(port.portConf.Name) == portnamel {
 			// we found our port
-			//spHandlerClose(port)
 			return port, true
 		}
 	}

@@ -13,3 +13,5 @@ Open up the web browser and go to the file path:
 localhost:89898/serial
 
 Communicate with the serial port using the web browser.
+
+Most of this code was derived from http://github.com/johnlauer/serial-port-json-server
