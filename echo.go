@@ -65,6 +65,9 @@ func (echo *echoHub) run() {
 			c.send <- []byte("{\"Version\" : \"" + version + "\"} ")
 			c.send <- []byte("{\"Commands\" : [\"list\", \"open [portName] [baud]\", \"send [portName] [cmd]\",  \"close [portName]\", \"baudrates\", \"restart\", \"exit\", \"hostname\", \"version\"]} ")
 
+			// Send the serial port list
+			serialPortList()
+
 			log.Println("Registering websocket")
 
 		// Unregister websocket
@@ -98,7 +101,6 @@ func (echo *echoHub) run() {
 					log.Print("Close websocket send")
 					close(c.send)
 					delete(echo.websocketConn, c)
-					//go c.ws.Close()
 				}
 			}
 

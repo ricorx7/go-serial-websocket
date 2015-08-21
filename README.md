@@ -10,7 +10,7 @@ go build
 
 This will open a serial port connection to COM5 with a baudrate of 115200.  
 Open up the web browser and go to the file path:
-localhost:89898/serial
+localhost:8989/serial
 
 Communicate with the serial port using the web browser.
 
