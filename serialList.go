@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/rowetechinc/go-serial"
+	"github.com/ricorx7/go-serial"
 )
 
 ///
